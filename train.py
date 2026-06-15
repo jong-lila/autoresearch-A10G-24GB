@@ -448,7 +448,7 @@ FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 
 # Model size
 DEPTH = 8               # number of transformer layers
-DEVICE_BATCH_SIZE = 16   # A10G-24GB: was 128 (H100-80GB); grad_accum keeps TOTAL_BATCH_SIZE fixed
+DEVICE_BATCH_SIZE = 32   # A10G-24GB: was 128 (H100-80GB); grad_accum keeps TOTAL_BATCH_SIZE fixed
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader

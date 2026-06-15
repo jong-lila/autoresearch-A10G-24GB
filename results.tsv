@@ -1,2 +1,4 @@
 commit	val_bpb	memory_gb	status	description
-a10g-baseline	1.324339	6.0	KEEP	A10G-24GB baseline: DEVICE_BATCH_SIZE 128->16, grad_accum 2->16, TOTAL_BATCH_SIZE unchanged
+a10g-bs16	1.324339	6.0	KEEP	Baseline: DEVICE_BATCH_SIZE 128->16, grad_accum 16, TOTAL_BATCH_SIZE fixed
+a10g-bs32	1.322980	11.7	KEEP	DEVICE_BATCH_SIZE 32 (grad_accum 8): +0.1% val_bpb, ~3% more tok/s; A10G is compute-bound
+a10g-bs64		22.0	CRASH	DEVICE_BATCH_SIZE 64 OOMs on 24GB (logits 131072x8192)
