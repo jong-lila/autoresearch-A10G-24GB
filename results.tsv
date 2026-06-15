@@ -1,0 +1,2 @@
+commit	val_bpb	memory_gb	status	description
+a10g-baseline	1.324339	6.0	KEEP	A10G-24GB baseline: DEVICE_BATCH_SIZE 128->16, grad_accum 2->16, TOTAL_BATCH_SIZE unchanged
