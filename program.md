@@ -1,6 +1,32 @@
-# autoresearch
+# autoresearch v2 (A10G-tuned)
 
-This is an experiment to have the LLM do its own research.
+This is an experiment to have the LLM do its own research. **v2** ships the defaults discovered by a
+prior 25-experiment loop on a single NVIDIA A10G (24 GB) — `train.py` already starts from the best
+known config (val_bpb 1.1749, down from the 1.3230 upstream baseline, −11.2%). Read the priors below
+before experimenting so you don't re-walk paths already known to be dead.
+
+## Prior learnings (read first — empirical, specific to a compute-bound 24 GB GPU)
+
+**Governing principle: the eval runs under a FIXED 5-minute wall-clock budget, and this GPU is
+compute-bound (MFU ~60%). The lever that matters is STEP COUNT, not per-step model capacity.**
+Anything that makes a step cheaper (fits more steps in 5 min) tends to win; anything that makes a step
+more expensive tends to lose even if it improves loss-per-step.
+
+Already-tuned defaults in `train.py` (don't expect easy wins re-touching these):
+- `ASPECT_RATIO=32`, `DEPTH=8`, `MLP=2x`, `HEAD_DIM=128` — deliberately small/narrow/lean.
+- `MATRIX_LR=0.10` (Muon), `UNEMBEDDING_LR=0.012`, `EMBEDDING_LR=0.8` — swept and bracketed.
+- `DEVICE_BATCH_SIZE=32` (fits 24 GB; `TOTAL_BATCH_SIZE` unchanged via grad-accum).
+
+Confirmed DEAD ENDS (tried, regressed, reverted — don't repeat without a genuinely new angle):
+- Increasing `DEPTH` (10, 12): steps crater, big regression. The worst offender.
+- `WARMUP_RATIO > 0`: wastes early budget at low LR.
+- Wider MLP (6x), more global attention (`WINDOW_PATTERN` with more `L`), MQA (`n_kv_head=1`),
+  `HEAD_DIM=64`: all trade steps/capacity the wrong way.
+- `ADAM_BETAS β1`, `WEIGHT_DECAY`, `SCALAR_LR`: neutral — upstream defaults already fine.
+
+Remaining upside likely is here (UNTESTED — lower loss WITHOUT adding per-step cost):
+- Positional scheme, activation/normalization variants, a more sample-efficient optimizer,
+  data ordering/curriculum. Favor ideas that keep step time flat or lower.
 
 ## Setup
 
