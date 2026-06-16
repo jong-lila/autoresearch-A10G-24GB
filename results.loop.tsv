@@ -23,3 +23,5 @@ a058880	1.176175	6.4	discard	MLP 2x->1x (tie, 2x optimal by simplicity, reverted
 499311f	1.175458	7.2	keep	UNEMBEDDING_LR 0.008->0.012 (lean re-tune, marginal -0.0007)
 fb61372	1.176286	7.2	discard	SCALAR_LR 0.5->1.0 (neutral, reverted)
 32d0d27	1.197464	6.2	discard	HEAD_DIM 128->64 (finer attn hurts quality, reverted)
+0550855	1.174874	5.1	keep	ASPECT_RATIO 40->32 (335 steps, marginal new best -0.0006)
+6024750	1.174978	5.1	discard	ASPECT_RATIO 32->28 (tie, 32 is width floor, reverted)

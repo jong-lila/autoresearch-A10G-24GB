@@ -29,3 +29,7 @@ Baseline: DEPTH=8 BATCH=32, val_bpb=1.3230, peak 11.7GB
 | 21 | UNEMBED_LR 0.012 | 1.1755 | -0.0007 | KEEP (best, marginal) |
 | 22 | SCALAR_LR 1.0 | 1.1763 | +0.0008 | DISCARD (reverted) |
 | 23 | HEAD_DIM 64 | 1.1975 | +0.022 | DISCARD (reverted) |
+| 24 | ASPECT_RATIO 32 | 1.1749 | -0.0006 | KEEP (best, 335 steps) |
+| 25 | ASPECT_RATIO 28 | 1.1750 | +0.0001 | DISCARD (32 is floor) |
+
+**LOOP CONVERGED — stopped at iter 25. Best: val_bpb 1.1749 (-11.2% vs 1.3230 baseline).**

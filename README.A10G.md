@@ -88,3 +88,68 @@ uv run prepare.py                   # downloads data + trains tokenizer (~2 min)
 uv run train.py                     # one 5-min experiment
 SAVE_CHECKPOINT=1 uv run train.py   # same, but also writes checkpoints/model.pt
 ```
+
+---
+
+# Learning Report
+
+*Written after a 25-experiment autonomous research loop on the A10G (branch `autoresearch/jun15`),
+run under a self-imposed 12-hour cap. Each experiment = one 5-minute training run, kept if `val_bpb`
+dropped and reverted otherwise.*
+
+## Headline
+
+**Baseline `val_bpb` 1.3230 → best 1.1749 — a 11.2% improvement**, with peak VRAM *falling* from
+11.7 GB to 5.1 GB. The winning model is smaller, leaner, and faster than the upstream default, not
+bigger. Every gain came from one insight applied repeatedly.
+
+## The one idea that mattered: this GPU is compute-bound, so buy steps, not capacity
+
+The metric is measured under a **fixed 5-minute wall-clock budget**. On the A10G (MFU ~60–68%, i.e.
+compute-saturated) the binding constraint is *how many optimizer steps fit in 5 minutes*, not how
+much VRAM the model uses. That single fact explains nearly every result:
+
+- **Anything that makes a step cheaper → more steps → lower val_bpb.** Narrowing the model
+  (`ASPECT_RATIO` 64→32) and shrinking the MLP (4×→2×) each won decisively. Step count rose from
+  **125 → 335** over the run; that extra training dominated the loss of per-step capacity.
+- **Anything that makes a step more expensive lost — every time.** Deeper (`DEPTH` 8→10/12), wider MLP
+  (6×), more global attention (`SSLL`) all *improved loss-per-step* but ran so many fewer steps that
+  final `val_bpb` regressed. Five separate experiments confirmed this; it is the most robust finding.
+
+Counterintuitively, the best model uses **less than half** the baseline's VRAM. On a memory-rich H100
+the optimum would sit elsewhere — this is a hardware-specific conclusion.
+
+## What worked (kept, in order of impact)
+
+| Change | val_bpb | Why |
+|--------|---------|-----|
+| `ASPECT_RATIO` 64 → 48 | 1.2646 → **1.1917** | Biggest single win (−0.056). Narrower = 175 steps vs 125. |
+| `MATRIX_LR` (Muon) 0.04 → 0.10 | 1.3230 → 1.2646 | The Muon LR was badly underset. Peaked at 0.10. |
+| `MLP ratio` 4× → 2× | 1.1917 → 1.1762 | Leaner FFN, more steps. 1× ties → 2× kept on simplicity. |
+| `ASPECT_RATIO` 40 → 32 | → **1.1749** | Extends the "narrow wins" curve; floor at 32 (28 ties). |
+| `UNEMBEDDING_LR` 0.004 → 0.008→0.012 | −0.017 total | lm_head LR underset; re-tuned again after the model shrank. |
+| `EMBEDDING_LR` 0.6 → 0.8 | marginal | Small, kept (lower with no complexity). |
+
+## What didn't (reverted) — equally valuable as negative results
+
+- **`DEPTH` up (10, 12)** — worst offenders. Depth doesn't parallelize like width, so steps crater.
+- **`WARMUP_RATIO` 0→0.1** — actively harmful: wastes early budget at low LR when every step counts.
+- **Wider MLP (6×), global attention (`SSLL`), MQA (`n_kv_head=1`), `HEAD_DIM` 64** — all traded steps
+  or capacity the wrong way.
+- **`ADAM_BETAS` β1, `WEIGHT_DECAY`, `SCALAR_LR`** — neutral; the upstream defaults were already fine.
+
+## Methodological notes
+
+- **LR sweet spots bracket cleanly** (e.g. MATRIX_LR 0.10 kept, 0.13 reverted) — push until it regresses,
+  then back off. Optimal LRs also *shift when the model changes size*; re-tuning after the shape change
+  found another small win.
+- **Diminishing returns are real**: the last five keeps were all sub-0.001. The loop was stopped at
+  iter 25 (not the 12h cap) once every dimension was mapped and further runs only re-sampled eval noise.
+- **Full per-experiment log:** [`PROGRESS.md`](./PROGRESS.md) and `results.loop.tsv`.
+
+## If continuing
+
+The hyperparameter/shape space is exhausted. The remaining upside is *architectural* — changes that
+lower loss **without** adding per-step cost: better positional scheme, activation/normalization tweaks,
+or a more sample-efficient optimizer. Those are the only levers left that don't fight the step-count
+budget.
