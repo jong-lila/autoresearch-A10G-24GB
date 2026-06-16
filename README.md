@@ -1,89 +1,70 @@
-# Fine-tuning — synthetic DPO
+# Fine-tuning v3 — rejection-sampling SFT (self-improvement)
 
-This branch adds a **DPO (Direct Preference Optimization)** stage on top of the A10G-tuned base model
-(branch `autoresearch-v2`). It is self-contained: two scripts, no new dependencies, no reward model,
-no external API. It runs on the same single A10G (24 GB).
+This branch tries a different synthetic fine-tuning approach than the DPO branch: **rejection-sampling
+SFT** (a.k.a. the STaR recipe). Instead of preference pairs, the model samples several continuations of
+its own, a programmatic scorer keeps the best one, and the model is then plain-SFT'd on its own best
+samples. No reward model, no judge, no external API, no new dependencies — runs on the same A10G (24 GB).
 
-## Why DPO (not PPO/GRPO)
+## Why this, after DPO
 
-The preference pairs here are **offline and pre-labeled**, so we need neither rollouts nor a reward
-model nor a value network. DPO directly optimizes the policy against a frozen reference using the pairs,
-which makes it the cheapest and most stable RLHF-family method on a small single GPU. (PPO would add a
-value net + reward model + online generation — far heavier and unstable at 50M params. GRPO would still
-need online sampling + a programmatic reward.) DPO holds just **2 models** (policy + frozen reference),
-both of which fit comfortably in 24 GB.
+The synthetic-DPO branch failed for a specific reason: its preference pairs (real text vs.
+repeat/shuffle/truncate corruption) were **trivially separable** — the base model already preferred the
+real text by a wide margin, so DPO had almost no gradient to learn from. Rejection-sampling SFT fixes
+that by making the candidates **on-policy** (drawn from the current model), so they sit right at the
+model's ability frontier — where the learning signal actually is.
 
-## How the synthetic preferences are made (`gen_dpo_data.py`)
+## Pipeline
 
-No human labels and no judge model. Each `(prompt, chosen, rejected)` triple is built from the real
-pretraining corpus, giving a **verifiable** preference (the corruption is objectively worse text):
+**`gen_rsft_data.py`** — for each real-document prompt (128 tokens), sample N continuations from the
+model (temp 0.9, top-k 50), score each, keep the best, save `(prompt, best_completion)` as an SFT target.
 
-- **prompt** — a 128-token prefix of a real document
-- **chosen** — the document's true continuation (coherent, in-distribution)
-- **rejected** — a degraded continuation, one of three corruption modes (rotated evenly):
-  - `repeat` — loops a 3-gram (the classic degenerate-repetition failure mode)
-  - `shuffle` — randomly permutes the continuation tokens (incoherent)
-  - `truncate` — keeps a quarter, pads the rest with a filler token
+Scoring is programmatic and **deliberately not perplexity** (repetition has *low* perplexity and would be
+rewarded). It combines:
+- distinct-bigram ratio (diversity),
+- a **hard repetition penalty** when any single token exceeds 15% of the completion (catches the
+  `flu flu flu …` domination that bigram diversity alone misses),
+- a mild mean-logprob fluency floor.
 
-```bash
-uv run gen_dpo_data.py --n 2000 --out dpo_data.pt
-```
-
-## The DPO trainer (`dpo.py`)
-
-Standard DPO loss, reusing the repo's `GPT` model and tokenizer:
-
-```
-L = -log σ( β · [ (logπ(chosen)   − logπ_ref(chosen))
-                − (logπ(rejected) − logπ_ref(rejected)) ] )
-```
-
-It loads one checkpoint as **both** the trainable policy and the frozen reference, then trains.
-Metrics reported: `loss`, preference `margin`, and `pref_acc` (fraction where the policy already
-prefers chosen over rejected).
+**`rsft.py`** — plain cross-entropy SFT on the kept sequences, with the prompt tokens masked
+(`ignore_index=-1`) so loss trains only the completion. Reuses the repo's `GPT.forward` loss path.
 
 ```bash
-# 1. produce a base checkpoint with THIS branch's train.py (shapes must match)
-SAVE_CHECKPOINT=1 uv run train.py
-# 2. generate preferences and run DPO
-uv run gen_dpo_data.py --n 2000
-SAVE_CHECKPOINT=1 uv run dpo.py --ckpt checkpoints/model.pt --data dpo_data.pt
+SAVE_CHECKPOINT=1 uv run train.py                 # base checkpoint (this branch's shapes)
+uv run gen_rsft_data.py --prompts 200 --samples 4 # sample + filter -> rsft_data.pt
+SAVE_CHECKPOINT=1 uv run rsft.py --data rsft_data.pt
 ```
 
-## Results (smoke run)
+## Results (smoke run) — and the honest finding
 
-A first end-to-end run on the A10G: **600 synthetic preference triples** (200 each of
-repeat/shuffle/truncate), base = the v2 checkpoint (val_bpb 1.1748), `BETA=0.1`, `LR=1e-5`, 1 epoch,
-75 steps. Per-step `pref_acc` = fraction of the batch where the policy already prefers *chosen*.
+Verified end-to-end on the A10G:
+- **Data gen:** 200 examples, mean max-unigram-frac of kept completions **0.118** (i.e. the scorer
+  successfully avoids picking heavily-repetitive samples; a first version without the repetition penalty
+  let `flu flu flu …` through at ~0.87 single-token domination).
+- **SFT training:** loss 3.57 → 3.17 over 2 epochs (26 steps), model saved.
 
-| step | loss | margin | pref_acc |
-|-----:|-----:|-------:|---------:|
-| 10 | 1.80 | +4.41 | 0.75 |
-| 20 | 5.62 | +3.00 | 0.75 |
-| 30 | 2.48 | +6.06 | 0.62 |
-| 40 | 7.92 | −1.93 | 0.50 |
-| 50 | 8.77 | +1.33 | 0.62 |
-| 60 | 2.87 | +7.64 | 0.75 |
-| 70 | 3.16 | +3.13 | 0.50 |
+**But the core finding is negative, and it's about the base model, not the pipeline:** even the
+best-of-4 sampled completions are weak — either creeping repetition or fluent-looking gibberish (sample
+decodes are in the commit history). A 50M model trained for 5 minutes simply cannot produce coherent
+128-token continuations, so there is little quality to *select for*. Rejection-sampling SFT assumes the
+model can occasionally produce good output you can filter and amplify; **at this scale/budget that
+assumption doesn't hold**, so SFT-ing on the filtered samples mostly reinforces mediocre text.
 
-**Final pref_acc: 0.619** over the last batches. Checkpoint saved to `checkpoints/dpo_model.pt`.
+This mirrors the DPO lesson from the other direction: DPO had *too-easy* signal; RSFT has a *too-weak
+base*. Both point to the same prerequisite.
 
-**Interpretation:** the pipeline is correct — preferences generate, the DPO loss computes, the policy
-trains and saves. But the run is **not converged**: loss swings wildly (1.8 → 8.8 → 2.9), the margin
-even flips negative at step 40, and pref_acc just oscillates around 0.6 rather than climbing. That's
-the signature of an **LR that's too high for the batch/`β`** on only 600 pairs — the optimizer is
-overshooting each preference rather than accumulating signal. Treat this as a *plumbing-verified
-baseline*, not a result to draw conclusions from.
+## What would actually help (in order)
 
-## Status & caveats
+1. **A stronger base model first.** Pretrain longer (minutes→hours, or a bigger model) before any
+   self-improvement step. This is the binding constraint — both fine-tuning attempts are bottlenecked
+   by base capability, not by the fine-tuning method.
+2. **A verifiable *task* instead of open-ended text.** Generate synthetic data for a task with a checkable
+   answer (arithmetic, sorting, copying, bracket-matching). Difficulty is controllable, correctness is
+   free, and "best sample" becomes objective rather than a fragile text-quality proxy.
+3. **Then** layer DPO/KTO on top, using on-policy pairs (best vs. worst sample) rather than
+   real-vs-corrupted, so the preference signal is non-trivial.
 
-- **Verified end-to-end**: data generation, DPO loss, training, and checkpoint save all run on the A10G.
-- **Hyperparameters are a starting point, not tuned.** `BETA=0.1`, `LR=1e-5`, 1 epoch. As the table above
-  shows, the loss is noisy and `pref_acc` hovers around 0.6 — the optimization needs an LR/β sweep and
-  more data (≥2k pairs) to converge cleanly. Lowering LR (e.g. 2e-6) and raising the pair count is the
-  natural next step.
-- **Checkpoint must come from this branch's `train.py`** — the MLP ratio and model shape are baked into
-  the model code, so a checkpoint trained with a different shape will fail to load (the script raises a
-  clear error pointing you to regenerate it).
-- One supporting change in `train.py`: its executable body is now under `if __name__ == "__main__":`
-  so `dpo.py` can `import GPT` without triggering a training run. No behavior change when run directly.
+## Files
+
+- `gen_rsft_data.py` — sampler + programmatic scorer → SFT dataset
+- `rsft.py` — masked cross-entropy SFT on the kept samples
+- `train.py` — unchanged from v2 except the `__main__` guard (so the scripts can `import GPT`)
