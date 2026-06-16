@@ -26,3 +26,6 @@ Baseline: DEPTH=8 BATCH=32, val_bpb=1.3230, peak 11.7GB
 | 18 | MLP 3x | 1.1821 | -0.010 | KEEP (new best, 191 steps) |
 | 19 | MLP 2x | 1.1762 | -0.006 | KEEP (new best, 213 steps) |
 | 20 | MLP 1x | 1.1762 | +0.00002 | DISCARD (tie, 2x optimal) |
+| 21 | UNEMBED_LR 0.012 | 1.1755 | -0.0007 | KEEP (best, marginal) |
+| 22 | SCALAR_LR 1.0 | 1.1763 | +0.0008 | DISCARD (reverted) |
+| 23 | HEAD_DIM 64 | 1.1975 | +0.022 | DISCARD (reverted) |
