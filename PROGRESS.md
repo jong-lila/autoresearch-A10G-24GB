@@ -21,3 +21,8 @@ Baseline: DEPTH=8 BATCH=32, val_bpb=1.3230, peak 11.7GB
 | 14 | DEPTH 10 | 1.3084 | +0.117 | DISCARD (reverted) |
 | 15 | MATRIX_LR 0.13 @narrow | 1.1928 | +0.001 | DISCARD (reverted) |
 | 15 | MATRIX_LR 0.13 @narrow | 1.1928 | +0.001 | DISCARD (reverted) |
+| 16 | MQA n_kv_head=1 | 1.1982 | +0.006 | DISCARD (reverted) |
+| 17 | MLP 6x | 1.2086 | +0.017 | DISCARD (reverted) |
+| 18 | MLP 3x | 1.1821 | -0.010 | KEEP (new best, 191 steps) |
+| 19 | MLP 2x | 1.1762 | -0.006 | KEEP (new best, 213 steps) |
+| 20 | MLP 1x | 1.1762 | +0.00002 | DISCARD (tie, 2x optimal) |
