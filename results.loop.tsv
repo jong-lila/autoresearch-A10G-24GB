@@ -1,0 +1,9 @@
+commit	val_bpb	memory_gb	status	description
+2fb7283	1.296352	11.4	keep	MATRIX_LR 0.04->0.05 (Muon)
+932be52	1.273782	11.4	keep	MATRIX_LR 0.05->0.07
+9f980f0	1.264579	11.4	keep	MATRIX_LR 0.07->0.10
+c7946f5	1.279176	11.4	discard	MATRIX_LR 0.10->0.13 (overshoot, reverted)
+7c7d232	1.263939	11.4	keep	EMBEDDING_LR 0.6->0.8 (marginal -0.0006)
+8081829	1.356888	11.4	discard	WARMUP_RATIO 0.0->0.1 (wastes budget at fixed 5min, reverted)
+3360043	1.268674	11.4	discard	WINDOW_PATTERN SSSL->SSLL (more global attn, slower, reverted)
+741d0ae	1.279058	11.4	discard	ADAM_BETAS beta1 0.8->0.9 (reverted)
